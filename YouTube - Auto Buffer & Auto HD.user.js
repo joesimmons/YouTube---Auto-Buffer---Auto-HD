@@ -1,30 +1,40 @@
 // ==UserScript==
-// @name           YouTube Auto Buffer & Auto HD
-// @namespace      http://userscripts.org/users/23652
-// @description    Buffers the video without autoplaying and puts it in HD if the option is on. For Firefox, Opera, & Chrome
-// @include        http://*.youtube.com/*
-// @include        http://youtube.com/*
-// @include        https://*.youtube.com/*
-// @include        https://youtube.com/*
-// @copyright      JoeSimmons
-// @version        1.2.85
-// @license        http://creativecommons.org/licenses/by-nc-nd/3.0/us/
-// @require        http://userscripts.org/scripts/source/49700.user.js?name=GM_config
-// @require        https://raw.github.com/joesimmons/jsl/master/jsl.user.js
-// @require        http://usocheckup.dune.net/49366.js
-// @grant          GM_info
-// @grant          GM_getValue
-// @grant          GM_log
-// @grant          GM_openInTab
-// @grant          GM_registerMenuCommand
-// @grant          GM_setValue
-// @grant          GM_xmlhttpRequest
+// @name          YouTube Auto Buffer & Auto HD
+// @namespace     http://userscripts.org/users/23652
+// @description   Buffers the video without autoplaying and puts it in HD if the option is on. For Firefox, Opera, & Chrome
+// @icon          https://raw.github.com/joesimmons/YouTube---Auto-Buffer---Auto-HD/master/media/logo-64x64.png
+// @include       http://*.youtube.com/*
+// @include       http://youtube.com/*
+// @include       https://*.youtube.com/*
+// @include       https://youtube.com/*
+// @copyright     JoeSimmons
+// @author        JoeSimmons
+// @version       1.2.85
+// @license       GPL version 3 or any later version; http://www.gnu.org/copyleft/gpl.html
+// @require       http://userscripts.org/scripts/source/49700.user.js?name=GM_config
+// @require       https://raw.github.com/joesimmons/jsl/master/versions/jsl-1.3.0.js
+//@require       http://usocheckup.dune.net/49366.js
+// @grant         GM_info
+// @grant         GM_getValue
+// @grant         GM_log
+// @grant         GM_openInTab
+// @grant         GM_registerMenuCommand
+// @grant         GM_setValue
+// @grant         GM_xmlhttpRequest
 // ==/UserScript==
 
-/* RELEASE NOTES
+/* CHANGELOG
 
-1.2.85 (11/3/2013)
-    - changed internal name of the Activation Mode option. it will seem reset on first install
+1.2.85 (12/11/2013)
+    - added a script icon
+    - added a "Player Color Scheme" option
+    - fixed bug with SPF not being de-activated properly in non-Firefox browsers
+    - fixed volume bug
+    - fixed adding time in url bug. it will now skip to the right portion of the video
+    - changed internal name of the "Activation Mode" option. shouldn't affect the user
+    - the script doesn't add any javascript to the page anymore
+        it uses onYouTubePlayerReady to detect when the player is ready;
+            it's much more performant than an interval
 
 1.2.84 (10/31/2013)
     - added primitive type checking when copying ytplayer.config.args into the flashvars.
@@ -113,8 +123,6 @@
 
 
 
-
-
 // run the script in an IIFE function, to hide its variables from the global scope
 (function (undefined) {
 
@@ -122,12 +130,13 @@
 
     var aBlank = ['', '', ''],
         URL = location.href,
-        sec = 0,
         navID = 'watch7-user-header',
+        rYoutubeUrl = /^https?:\/\/([^\.]+\.)?youtube\.com\//,
+        rYoutubeBlacklistedUrl = /^https?:\/\/([^\.]+\.)?youtube\.com\/(feed\/|account|inbox|my_|tags|view_all|analytics|dashboard|results)/i,
         rList = /[?&]list=/i,
         rPlaySymbol = /^\u25B6\s*/,
         script_name = 'YouTube - Auto-Buffer & Auto-HD',
-        tTime = (URL.match(/[#&]t=(\d+)/) || aBlank)[1],
+        tTime = (URL.match(/[&#?]t=([sm0-9]+)/) || aBlank)[1],
         ads = [
             'supported_without_ads',
             'ad3_module',
@@ -159,53 +168,11 @@
         ],
         nav, wait_intv, uw;
 
-/*
-    // this function will get added to the page in a <script> tag
-    function onYouTubePlayerReady() {
-        var player = document.getElementById('movie_player');
-
-        // adjust to the 'play symbol in title' feature
-        document.title = document.title.replace(/^\u25B6\s+/, '');
-
-        window.g_YouTubePlayerIsReady = true;
-
-        // Add the event listeners so functions get executed when the player state/format changes
-        player.addEventListener('onStateChange',             'stateChange');
-        player.addEventListener('onPlaybackQualityChange',   'onPlayerFormatChanged');
-
-        // Play the video if autobuffer enabled, otherwise just set volume
-        if (activationMode === 'buffer') {
-            player.playVideo();
-        } else if (volume !== 1000) {
-            player.setVolume(volume);
-        }
+    function toNum(a) {
+        return parseInt(a, 10);
     }
 
-    // this function will get added to the page in a <script> tag
-    function stateChange(state) {
-        var player = document.getElementById('movie_player');
-
-        if (state === 1 && alreadyBuffered === false && activationMode === 'buffer' && !playIfPlaylist) {
-            // Pause the video so it can buffer
-            player.pauseVideo();
-
-            // Set the volume to the user's preference
-            if (volume !== 1000) player.setVolume(volume);
-
-            // Seek back to the beginning, or pre-defined starting time (url #t=xx)
-            if (player.getCurrentTime() <= 3) player.seekTo(0);
-
-            window.setTimeout(function () {
-                // adjust to the 'play symbol in title' feature
-                document.title = document.title.replace(/^\u25B6\s+/, '');
-            }, 500);
-
-            // Make sure it doesn't auto-buffer again when you press play
-            alreadyBuffered = true;
-        }
-    }
-*/
-    // msg by JoeSimmons. first arg is the message, second arg is the header
+    // msg by JoeSimmons
     function msg(infoObject) {
 
         var box_id_name = 'script_msg',
@@ -227,13 +194,20 @@
         }
 
         if (box == null) {
-            JSL.addStyle('@keyframes blink {\n\t50% {color: #B95C00;}\n}\n\n#' + box_id_name + ' .msg-header {\n\tanimation: blink 1s linear infinite normal;\n}');
+            JSL.addStyle('' +
+                '@keyframes blink { ' +
+                    '50% { color: #B95C00; } ' +
+                '}\n\n' +
+                '#' + box_id_name + ' .msg-header { ' +
+                    'animation: blink 1s linear infinite normal; ' +
+                '}' +
+            '');
             document.body.appendChild(
                 JSL.create('div', {id : box_id_name, style : 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 999999; background-color: rgba(0, 0, 0, 0.6);'}, [
                     // main box
                     JSL.create('div', {id : box_id_name + '_box', style : 'position: absolute; top: 25%; left: 25%; width: 50%; height: 50%; padding-top: 50px; background-color: #E9E9E9; border: 3px double #006195;'}, [
                         // header
-                        JSL.create('div', {style : 'margin: 0 auto; padding-bottom: 40px; color: #F07800; font-size: 21pt; font-family: Arial, Verdana, "Myriad Pro"; font-weight: normal; text-shadow: 2px 2px 4px #C7C7C7; text-align: center;', 'class' : 'msg-header', textContent : h}),
+                        JSL.create('div', {style : 'margin: 0 auto; padding-bottom: 40px; color: #F07800; font-size: 21pt; font-family: Arial, Verdana, "Myriad Pro"; font-weight: normal; text-shadow: 2px 2px 4px #C7C7C7; text-align: center;', 'class' : 'msg-header', textContent : title}),
 
                         // text (message)
                         JSL.create('div', {innerHTML : infoObject.text, style : 'text-align: center; margin: 0 auto; padding-top: 39px; border-top: 1px solid #B0B0B0; color: #000000; font-size: 11pt; font-family: Arial, Verdana, "Myriad Pro"; font-weight: normal; text-shadow: 0 0 8px #AEAEAE;'}),
@@ -281,7 +255,7 @@
     // unwraps the element so we can use its methods freely
     function unwrap(elem) {
         if (elem) {
-            if ( typeof XPCNativeWrapper === 'function' && typeof XPCNativeWrapper.unwrap === 'function' && elem === XPCNativeWrapper(elem) ) {
+            if ( typeof XPCNativeWrapper === 'function' && typeof XPCNativeWrapper.unwrap === 'function' ) {
                 return XPCNativeWrapper.unwrap(elem);
             } else if (elem.wrappedJSObject) {
                 return elem.wrappedJSObject;
@@ -291,27 +265,53 @@
         return elem;
     }
 
+    function fixPlaySymbol() {
+        document.title = document.title.replace(rPlaySymbol, '');
+    }
+
     // grabs the un-wrapped player
     function getPlayer() {
-        return uw.document.getElementById('movie_player');
+        var doc = uw.document;
+        return doc.getElementById('c4-player') || doc.getElementById('movie_player');
+    }
+
+     // this function sets up the script
+    function init() {
+        // temporary fix to disable SPF aka the "red bar" feature
+        if (uw._spf_state && uw._spf_state.config) {
+            uw._spf_state.config['navigate-limit'] = 0;
+            uw._spf_state.config['navigate-processed-callback'] = function (targetUrl) {
+                location.href = targetUrl;
+            };
+        }
+
+        uw.onYouTubePlayerReady = function (player) {
+            if (typeof player === 'object') {
+                main();
+                addButton();
+            }
+        };
     }
 
     // this is the main function. it does all the autobuffering, quality/volume changing, annotation hiding, etc
-    function main(player) {
+    function main() {
         var userOpts = {
-                activationMode    : GM_config.get('activationMode'),
-                quality           : GM_config.get('autoHD'),
-                volume            : GM_config.get('volume'),
-                hideAnnotations   : GM_config.get('hideAnnotations') === true,
-                hideAds           : GM_config.get('hideAds') === true,
-                disableDash       : GM_config.get('disableDash') === true
-            },
-            playerClone = player.cloneNode(true),
-            fv = playerClone.getAttribute('flashvars'),
-            isHTML5 = JSL('video.html5-main-video').exists,
-            playIfPlaylist = URL.match(rList) != null && GM_config.get('autoplayplaylists') === true,
-            alreadyBuffered = false,
-            args, arg, val, buffer_intv;
+            activationMode    : GM_config.get('activationMode'),
+            disableDash       : GM_config.get('disableDash') === true,
+            hideAnnotations   : GM_config.get('hideAnnotations') === true,
+            hideAds           : GM_config.get('hideAds') === true,
+            quality           : GM_config.get('autoHD'),
+            theme             : GM_config.get('theme'),
+            volume            : GM_config.get('volume')
+        },
+        player = getPlayer(),
+        playerClone = player.cloneNode(true),
+        fv = playerClone.getAttribute('flashvars'),
+        isHTML5 = !!document.querySelector('video.html5-main-video'),
+        playIfPlaylist = !!URL.match(rList) && GM_config.get('autoplayplaylists') === true,
+        alreadyBuffered = false,
+        time = 0,
+        args, arg, val, buffer_intv;
 
         if (uw.ytplayer && uw.ytplayer.config && uw.ytplayer.config.args) {
             args = uw.ytplayer.config.args;
@@ -322,7 +322,7 @@
                 player.setPlaybackQuality(userOpts.quality);
             }
 
-            if (userOpts.volume !== 1000) {
+            if (userOpts.volume != 1000) {
                 player.setVolume(userOpts.volume);
             }
 
@@ -344,7 +344,7 @@
                 }
             }
 
-            // experimental ad removal feature
+            // ad removal
             if (userOpts.hideAds) {
                 fv = setPref(fv, 
                     ads.map(function (ad) {
@@ -353,7 +353,7 @@
                 );
             }
 
-            // disable Dash playback
+            // disable DASH playback
             if (userOpts.disableDash) {
                 fv = setPref(fv, [
                     ['dashmpd', ''],
@@ -363,51 +363,72 @@
 
             // edit the flashvars
             fv = setPref(fv, [
-                ['enablejsapi', '1'],                                   // enable JS API
-                ['vq', userOpts.quality],                                    // set the quality
-                ['autoplay', userOpts.activationMode !== 'none' || playIfPlaylist ? '1' : '0' ],              // enable/disable autoplay
-                ['iv_load_policy', userOpts.hideAnnotations ? '3' : '1' ]    // enable/disable annotations
+                ['vq', userOpts.quality],                                                        // set the quality
+                ['autoplay', userOpts.activationMode !== 'none' || playIfPlaylist ? '1' : '0' ], // enable/disable autoplay
+                ['iv_load_policy', userOpts.hideAnnotations ? '3' : '1' ],                       // enable/disable annotations
+                ['theme', userOpts.theme],                                                       // use light/dark theme
+
+                // some "just-in-case" settings
+                ['enablejsapi', '1'],                                                            // enable JS API
+                ['fs', '1'],                                                                     // enable fullscreen button, just in-case
+                ['modestbranding', '1'],                                                         // hide YouTube logo in player
+                ['disablekb', '0']                                                               // enable keyboard controls in player
             ]);
+
+            // handle video starting time
+            videoStartingTime: {
+                if ( tTime.match(/\d+m/) ) {
+                    time += toNum( tTime.match(/(\d+)m/)[1] ) * 60;
+                }
+                if ( tTime.match(/\d+s/) ) {
+                    time += toNum( tTime.match(/(\d+)s/)[1] );
+                }
+                if ( tTime.match(/^\d+$/) ) {
+                    time += toNum(tTime);
+                }
+                if (time <= 3) {
+                    time = player.getCurrentTime();
+                    if (time <= 3) {
+                        time = 0;
+                    }
+                }
+
+                fv = setPref( fv, [ ['start', time] ] );
+            }
 
             // set the new player's flashvars
             playerClone.setAttribute('flashvars', fv);
 
             // set the volume to the user's preference
-            if (userOpts.volume !== 1000) {
+            if (userOpts.volume != 1000) {
                 player.setVolume(userOpts.volume);
             }
 
-            JSL(player).replace(playerClone);
-            player = getPlayer();
+            player.parentNode.replaceChild(playerClone, player);
 
             // and add some other necessary vars and functions to the page for auto-buffering
-            if (userOpts.activationMode === 'buffer') {
-                /*
-                JSL.addScript('var alreadyBuffered = false, ' +
-                                  'playIfPlaylist = ' + playIfPlaylist + ', ' +
-                                  'volume = ' + userOpts.volume + ', ' +
-                                  'activationMode = "'+ userOpts.activationMode + '";\n\n' +
-                               onYouTubePlayerReady + '\n\n' + stateChange,
-                'stateChange');
-                */
+            if (userOpts.activationMode === 'buffer' && playIfPlaylist === false) {
                 buffer_intv = JSL.setInterval(function () {
-                    if (player.getPlayerState && player.getPlayerState() === 1 && playIfPlaylist === false) {
+                    var player = getPlayer();
+
+                    if (player && typeof player.getPlayerState === 'function') {
                         JSL.clearInterval(buffer_intv);
 
                         // pause the video so it can buffer
                         player.pauseVideo();
 
-                        // seek back to the beginning, or pre-defined starting time (url #t=xx)
+                        // seek back to beginning if time elapsed is not much
                         if (player.getCurrentTime() <= 3) {
                             player.seekTo(0);
                         }
 
                         // adjust to the 'play symbol in title' feature
-                        window.setTimeout(function () {
-                            document.title = document.title.replace(rPlaySymbol, '');
-                        }, 500);
+                        window.setTimeout(fixPlaySymbol, 500);
                     }
                 }, 100);
+            } else if (userOpts.activationMode === 'none') {
+                // adjust to the 'play symbol in title' feature
+                window.setTimeout(fixPlaySymbol, 1000);
             }
         }
 
@@ -434,9 +455,11 @@
         // grab an element to append the options button onto
         nav = JSL('#' + navID + ', div.primary-pane, div[class="module-view featured-video-view-module"], #gh-overviewtab > div.c4-spotlight-module');
 
-        if ( nav.exists && !JSL('#autobuffer-options').exists ) {
+        if (nav.exists && !JSL('#autobuffer-options').exists) {
             nav.append('' +
-                '<button id="autobuffer-options" type="button" class="yt-uix-button yt-uix-button-text yt-uix-tooltip" style="' + (footer === true ? 'margin-left: 10px; ' : 'margin-top: 8px; ') + 'margin-right: 8px; border: 1px solid #CCCCCC; border-radius: 6px; background: transparent !important;">' +
+                '<button id="autobuffer-options" type="button" class="yt-uix-button yt-uix-button-text yt-uix-tooltip" style="' +
+                (footer === true ? 'margin-left: 10px; ' : 'margin-top: 8px; ') +
+                'margin-right: 8px; border: 1px solid #CCCCCC; border-radius: 6px; background: transparent !important;">' +
                     '<span class="yt-uix-button-content" title="Click here to set default Auto-Buffer options">Auto-Buffer Options</span>' +
                 '</button>' +
             '');
@@ -444,82 +467,10 @@
         }
     }
 
-    // this function sets up the script
-    function init() {
-        // temporary fix to disable SPF aka the "red bar" feature
-        if (uw._spf_state && uw._spf_state.config) {
-            uw._spf_state.config["navigate-limit"] = 0;
-        }
-
-        // Exit if it's a page it shouldn't run on
-        if ( URL.match(/^https?:\/\/([^\.]+\.)?youtube\.com\/(feed\/|account|inbox|my_|tags|view_all|analytics|dashboard|results)/i) ) { return; }
-
-        // fix #t= problem in url
-        if (URL.indexOf('#t=') !== -1) {
-            location.href = URL.replace('#t=', '&t=');
-        }
-
-        // wait for the player to be ready
-        sec = 0;
-        wait_intv = JSL.setInterval(waitForReady, 200);
-    }
-
-    // this function waits for the movie player to be ready before starting
-    function waitForReady() {
-        var player, args;
-
-        // if 10 seconds has elapsed, stop looking
-        if (sec < 50) {
-            sec += 1;
-        } else {
-            return JSL.clearInterval(wait_intv);
-        }
-
-        player = getPlayer();
-
-        // wait for player to be loaded (check if element is not null and player api exists
-        // if so, run main function and add the options button
-        if (player && player.getPlayerState) {
-            // make sure we don't continue with the interval
-            sec = 50;
-            JSL.clearInterval(wait_intv);
-
-            if (uw.ytplayer && uw.ytplayer.config && uw.ytplayer.config.args) {
-                args = uw.ytplayer.config.args;
-
-                // remove ads
-                if (GM_config.get('hideAds') === true) {
-                    JSL.each(ads, function (key) { // remove each ad key from ytplayer.config.args
-                        if (typeof args[key] !== 'undefined') {
-                            delete args[key];
-                        }
-                    });
-                }
-
-                args.vq = GM_config.get('autoHD'); // set quality in ytplayer.config.args
-                args.iv_load_policy = GM_config.get('hideAnnotations') === true ? '3' : '1'; // set annotations
-
-                if (GM_config.get('disableDash') === true) {
-                    args.dash = '0';
-                    delete args.dashmpd;
-                }
-
-                uw.ytplayer.config.args = args;
-            }
-
-            // run the main function
-            main(player);
-
-            // add the options button
-            addButton();
-        }
-    }
-
-    // Make sure the page is not in a frame
-    if (window.self !== window.top) { return; }
-
-    // Make 100% sure this script is running on YouTube
-    if ( !URL.match(/^https?:\/\/([^\.]+\.)?youtube\.com\//) ) { return; }
+    // make sure the page is not in a frame
+    // & is on a YouTube page (the @include works most of the time, but this is 100%)
+    // & isn't on a blacklisted YouTube page
+    if ( window !== window.top || !URL.match(rYoutubeUrl) || URL.match(rYoutubeBlacklistedUrl) ) { return; }
 
     // quit if JSL/GM_config is non-existant
     if (typeof JSL === 'undefined' || typeof GM_config === 'undefined') {
@@ -530,21 +481,10 @@
         '');
     }
 
-    // make sure unsafeWindow is proper in all browsers
-    uw = unwrap(window);
+    // get the raw window object of the YouTube page
+    uw = typeof unsafeWindow !== 'undefined' ? unsafeWindow : unwrap(window);
 
-    /*
-    spfFn = uw._spf_state.config['navigate-processed-callback'];
-    uw._spf_state.config['navigate-processed-callback'] = function () {
-        location.href = location.href;
-        URL = location.href;
-        init();
-
-        spfFn();
-    };
-    */
-
-    // add a user script command
+    // add a user-script command
     if (typeof GM_registerMenuCommand === 'function') {
         GM_registerMenuCommand('"' + script_name + '" Options', GM_config.open);
     }
@@ -559,9 +499,9 @@
     // init GM_config
     GM_config.init('"' + script_name + '" Options', {
         activationMode : {
+            section : ['Main Options'],
             label : 'Activation Mode',
             type : 'select',
-            section : ['Main Options'],
             options : {
                 'buffer' : 'Auto Buffer (aka Auto Pause)',
                 'play' : 'Auto Play',
@@ -579,38 +519,60 @@
                 'large' : '480p',
                 'hd720' : '720p (HD)',
                 'hd1080' : '1080p (HD)',
-                'highres' : '1080p+ (anything higher)'
+                'hd1440' : '1440p (HD)',
+                'highres' : 'Original'
             },
             'default' : 'hd1080'
         },
+        disableDash : {
+            label : 'Disable DASH Playback',
+            type : 'checkbox',
+            'default' : false,
+            title : '"DASH" loads the video in blocks/pieces; disrupts autobuffering -- Note: Qualities are limited when disabled'
+        },
         hideAds : {
-            label : 'Hide Ads (experimental)',
+            label : 'Disable Ads',
             type : 'checkbox',
             'default' : true,
-            title : 'Experimental feature. Don\'t expect it to work, but please report when it doesn\'t'
+            title : 'Should disable advertisements. AdBlock is better, though. Get that instead'
+        },
+        hideAnnotations : {
+            label : 'Disable Annotations',
+            type : 'checkbox',
+            'default' : false
+        },
+        theme : {
+            section : ['Other Options'],
+            label : 'Player Color Scheme',
+            type : 'select',
+            options : {
+                'dark' : 'Dark Theme',
+                'light' : 'Light Theme'
+            },
+            'default' : 'dark'
         },
         volume : {
             label : 'Set volume to: ',
             type : 'select',
             options : {
-                1000 : 'Don\'t Change',
-                0 : 'Off',
-                5 : '5%',
-                10 : '10%',
-                20 : '20%',
-                25 : '25% (quarter)',
-                30 : '30%',
-                40 : '40%',
-                50 : '50% (half)',
-                60 : '60%',
-                70 : '70%',
-                75 : '75% (three quarters',
-                80 : '80%',
-                90 : '90%',
-                100 : '100% (full)',
+                '1000' : 'Don\'t Change',
+                '0' : 'Off',
+                '5' : '5%',
+                '10' : '10%',
+                '20' : '20%',
+                '25' : '25% (quarter)',
+                '30' : '30%',
+                '40' : '40%',
+                '50' : '50% (half)',
+                '60' : '60%',
+                '70' : '70%',
+                '75' : '75% (three quarters',
+                '80' : '80%',
+                '90' : '90%',
+                '100' : '100% (full)',
             },
             title : 'What to set the volume to',
-            'default' : 1000
+            'default' : '1000'
         },
         autoplayplaylists : {
             label : 'Autoplay on Playlists (override)',
@@ -618,30 +580,65 @@
             'default' : false,
             title : 'This will enable autoplay on playlists, regardless of the "Activation Mode" option'
         },
-        hideAnnotations : {
-            label : 'Disable Annotations',
-            type : 'checkbox',
-            'default' : false,
-            title : 'This will turn off annotations'
-        },
-        disableDash : {
-            label : 'Disable Dash Playback',
-            type : 'checkbox',
-            'default' : false,
-            title : '"Dash Playback" loads the video in blocks/pieces; disrupts autobuffering. Note: 480p/1080p not available when disabled'
-        },
         footer : {
-            label : 'Show options button in page footer instead',
+            label : 'Options Button In Footer',
             type : 'checkbox',
             'default' : false,
             title : 'This will make the options button show at the bottom of the page in the footer'
         }
-    }, 'body * { font-family: Arial, Verdana; } body { background-color: #E9E9E9; } #config_header { font-size: 16pt !important; } .config_var { margin-left:20% !important; margin-top: 20px !important; } #header { margin: 15px auto 30px auto !important; } .indent40 { margin-left:20% !important; } .config_var * { font-size: 10pt !important; } .section_header { margin-left: 20% !important; padding: 2px !important; }', {
+    }, '' +
+    'body { ' +
+        'background-color: #DDDDDD !important; ' +
+        'color: #434343 !important; ' +
+        'font-family: Arial, Verdana, sans-serif !important; ' +
+    '}' +
+    '#config_header { ' +
+        'font-size: 16pt !important; ' +
+    '}' +
+    '.config_var { ' +
+        'margin-left: 20% !important; ' +
+        'margin-top: 20px !important; ' +
+    '}' +
+    '#header { ' +
+        'margin-bottom: 40px !important; ' +
+        'margin-top: 20px !important; ' +
+    '}' +
+    '.indent40 { ' +
+        'margin-left: 20% !important; ' +
+    '}' + 
+    '.config_var * { ' +
+        'font-size: 10pt !important; ' +
+    '}' +
+    '.section_header_holder { ' +
+        'border-bottom: 1px solid #BBBBBB !important; ' +
+        'margin-top: 14px !important; ' +
+    '}' +
+    '.section_header { ' +
+        'background-color: #BEDBFF !important; ' +
+        'color: #434343 !important; ' +
+        'margin-left: 20% !important; ' +
+        'margin-top: 8px !important; ' +
+        'padding: 2px 200px !important; ' +
+        'text-decoration: none !important; ' +
+    '}' +
+    '.section_kids { ' +
+        'margin-bottom: 14px !important; ' +
+    '}' +
+    '.saveclose_buttons { ' +
+        'font-size: 14pt !important; ' +
+    '}' +
+    '#buttons_holder { ' +
+        'padding-right: 50px; ' +
+    '}' +
+    '', {
+        close : function () {
+            JSL('#c4-player, #movie_player').css('visibility', 'visible');
+            JSL('#lights_out').hide();
+        },
         open : function () {
-            var frame = GM_config.frame;
-            frame.style.height = '70%';
-            frame.style.width = '50%';
-            GM_config.center();
+            JSL('#c4-player, #movie_player').css('visibility', 'hidden');
+            JSL('#lights_out').show('block');
+            JSL('#GM_config').css('height', '80%').css('width', '80%');
         }
     });
 
@@ -651,7 +648,15 @@
         GM_config.save();
     }
 
-    // call the function that sets up everything
-    JSL.runAt('interactive', init);
+    JSL.runAt('interactive', function () {
+        // this is for the "lights out" feature of GM_config
+        JSL(document.body).append('div', {
+            id : 'lights_out',
+            style : 'display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 999998; background: rgba(0, 0, 0, 0.72);'
+        });
+
+        // call the function that sets up everything
+        init();
+    });
 
 }());
