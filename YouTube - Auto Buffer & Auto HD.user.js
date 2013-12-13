@@ -13,7 +13,7 @@
 // @license       GPL version 3 or any later version; http://www.gnu.org/copyleft/gpl.html
 // @require       http://userscripts.org/scripts/source/49700.user.js?name=GM_config
 // @require       https://raw.github.com/joesimmons/jsl/master/versions/jsl-1.3.0.js
-//@require       http://usocheckup.dune.net/49366.js
+// @require       http://usocheckup.dune.net/49366.js
 // @grant         GM_info
 // @grant         GM_getValue
 // @grant         GM_log
